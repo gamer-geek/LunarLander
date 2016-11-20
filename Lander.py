@@ -60,12 +60,9 @@ class Lander(AcceleratingVehicle):
         
         self.legs.midright = self.hull.midright
         self.plume.midright = self.hull.midleft
-        self.noUpdate = False
-        
-        # XXX 
-        self.mesh = self.hull.copy()
-        self.fuel = fuel
         self.drymass = 10
+        
+        self.reset(xy, fuel)
 
     def reset(self, xy, fuel=100):
         self.position.xy = xy
@@ -74,18 +71,10 @@ class Lander(AcceleratingVehicle):
         self.throttle = 0
         self.crashed = False
         self.landed = False
-        self.noUpdate = False
         self.needsRender = True
         self.heading = 90
+        self.image.fill(self.clear)
 
-
-#    def __str__(self):
-#        s = []
-#        s.append('dV {l.velocity.x:5.1f}:{l.velocity.y:5.1f}'.format(l=self))
-#        s.append('Landed: {l.landed} Crashed: {l.crashed}'.format(l=self))
-#        s.append('Heading: {l.heading}'.format(l=self))
-#        return ' '.join(s)
-        
 
     @property
     def mass(self):
@@ -128,6 +117,14 @@ class Lander(AcceleratingVehicle):
         x,y = (self.position + (0, self.h * 1.5)).xy
         return int(x),int(y)
 
+    @property
+    def goodLanding(self):
+        dVx = abs(self.velocity.x) < self.gravity.y
+        dVy = self.velocity.y < (2*self.gravity.y)
+        H   = abs(self.heading-90) <= 10
+        return dVx and dVy and H
+        
+
     def colliderect(self, rect):
         '''
         '''
@@ -141,18 +138,16 @@ class Lander(AcceleratingVehicle):
     def collidelist(self, spritelist):
         '''
         '''
-        t = True
+        
+        for s in spritelist:
+            if not self.landed and self.colliderect(s.rect):
+                self.landed = self.goodLanding
+                self.crashed = not self.goodLanding
+                return s
+            
         self.landed = False
         self.crashed = False
-
-        for s in spritelist:
-            if self.colliderect(s.rect):
-                t &= abs(self.velocity.x) < self.gravity.y
-                t &= abs(self.velocity.y) < self.gravity.y
-                t &= abs(self.heading-90) <= 10
-                self.landed = t
-                self.crashed = not t
-                return s
+        
         return None
         
     def rotate(self, degrees):
@@ -163,26 +158,20 @@ class Lander(AcceleratingVehicle):
                             max(self.rect.w,self.rect.h),
                             layer=self.layer,generation=0)
         e.add(self.groups())
-                            
+        self.kill()
 
     def update(self, dt):
 
-        if self.noUpdate:
-            self.render()
-            return
-
         if self.alive() and self.crashed:
             self.doExplosion()
-            self.kill()
             return
 
+        prev = self.move(dt, gravity=self.gravity)
         if self.landed:
-            self.move(dt)
-            self.needsRender = True
-        else:
-            self.move(dt, gravity=self.gravity)
+            self.position.xy = map(int,prev.xy)
 
         self.render()
+
 
     def debug_draw(self,draw=False):
         if draw:
@@ -195,15 +184,23 @@ class Lander(AcceleratingVehicle):
             pygame.draw.rect(self.drawbuf, c, self.plume, 1)
 
     def draw_exhaust(self):
+        '''
+        '''
+        
         if self.throttle == 0:
             return
+        
         r = self.plume.copy()
-        r.w = self.plume.w * (self.throttle / 100)
+        r.w = int(self.plume.w * (self.throttle / 100))
+
+        if r.w < 1:
+            return
+        
         x,y = self.hull.midleft
-        r.midright = x-3, y
+        r.midright = x-5, y
 
         outline = [r.topright, r.midleft, r.bottomright]
-        #pygame.draw.polygon(self.drawbuf, (200,0,128), outline, 3)
+
         pygame.gfxdraw.filled_polygon(self.drawbuf, outline, (255, 0, 0))
 
         r.inflate_ip(-4,-4)
@@ -236,10 +233,10 @@ class Lander(AcceleratingVehicle):
         if self.needsRender:
             self.drawbuf.fill(self.clear)
             self.debug_draw(debug)
-            self.draw_exhaust()
             self.draw_lander()
+            self.mask = pygame.mask.from_surface(pygame.transform.rotate(self.drawbuf, self.heading))
+            self.draw_exhaust()
             self.image = pygame.transform.rotate(self.drawbuf, self.heading)
-            self.mask = pygame.mask.from_surface(self.image)
             self.needsRender = False
 
         self.rect = self.image.get_rect(center=self.position.xy)

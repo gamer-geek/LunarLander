@@ -10,8 +10,10 @@ from random import randint
 
 from Game import WASDGame
 from Lander import Lander
+from Effects import SimpleExplosion
 from Landscape import Tycho, LandingPad
 from Sky import Star
+from Chrome import Chrome
 
 
 # G(e) = 9.80 m/s^2
@@ -19,10 +21,13 @@ from Sky import Star
 
 G_Moon = 1.63
 
+FontName = 'PressStart2P.ttf'
+
 class LunarLanderGame(WASDGame):
 
     # draw layer z-order
-    RESERVE     = 5
+    CHROME      = 6
+    EXPLOSIONS  = 5
     FOREGROUND  = 4
     LANDINGPADS = 3
     TERRAIN     = 2
@@ -34,10 +39,15 @@ class LunarLanderGame(WASDGame):
         super().__init__(1024, 1024)
         
         pygame.display.set_caption('Lunar Lander Demo')
+
+        pygame.chrome = self.screen.copy()
+
         self.gravity = G_Moon
         self.scale = 1 # pixels per meter
         self.paused = False
+        self.hesitating = False
         self.gameOver = False
+        self.frames = 0
         
         self.add_event(QUIT,       self.quit)
         self.add_control(K_q,      self.handle_q)
@@ -49,16 +59,16 @@ class LunarLanderGame(WASDGame):
         self.add_control(K_x,      self.handle_x)
         self.add_control(K_z,      self.handle_z)
 
-        self.sprites = pygame.sprite.LayeredUpdates()
+        self.game_scene = pygame.sprite.LayeredUpdates()
 
         # XXX order sensitive
-        self.sprites.add(self.stars)
-        self.sprites.add(self.crater)
+        self.game_scene.add(self.stars)
+        self.game_scene.add(self.crater)
         for pad in self.crater.pads:
             pad.layer = self.LANDINGPADS
-        self.sprites.add(self.crater.pads)
-        self.sprites.add(self.lander)
-        self.sprites.add(self.guys)
+        self.game_scene.add(self.crater.pads)
+        self.game_scene.add(self.lander)
+        self.game_scene.add(self.chrome)
     
     @property
     def horizon(self):
@@ -68,6 +78,7 @@ class LunarLanderGame(WASDGame):
             pass
         self._horizon = (self.bounds.h / 4) * 3
         return self._horizon
+
 
     @property
     def skybox(self):
@@ -121,24 +132,6 @@ class LunarLanderGame(WASDGame):
         return self._lander
 
     @property
-    def guys(self):
-        try:
-            return self._guys
-        except AttributeError:
-            pass
-        self._guys = []
-        for i in range(0, 3):
-            l = Lander((0,0), self.gravity)
-            x,y = l.w * 3, l.h * 3
-            l.position.xy = x + (x*i), y
-            l.heading = 90
-            l.layer = self.RESERVE
-            l.noUpdate = True
-            self._guys.append(l)
-
-        return self._guys
-        
-    @property
     def stars(self):
         try:
             return self._stars
@@ -152,12 +145,30 @@ class LunarLanderGame(WASDGame):
             star.layer = self.SKYBOX
         return self._stars
 
+    @property
+    def chrome(self):
+        try:
+            return self._chrome
+        except AttributeError:
+            pass
+
+        self._chrome = Chrome(self.bounds, 2, Lander((0,0), 0))
+        self._chrome.layer = self.CHROME
+        
+        return self._chrome
+
+
     def keyUp(self, keycode):
         pass
 
     def keyDown(self, keycode):
 
         if keycode.dict['key'] == K_SPACE:
+
+            if self.chrome.gameOver:
+                self.chrome.reset()
+                return
+            
             self.paused = not self.paused
             return
         pass
@@ -174,7 +185,7 @@ class LunarLanderGame(WASDGame):
 
     def handle_space(self):
         pass
-
+    
     def handle_lshift(self):
         self.lander.throttle += 5
 
@@ -191,7 +202,7 @@ class LunarLanderGame(WASDGame):
         '''
         '''
 
-        if self.lander.crashed:
+        if self.lander.crashed or self.lander.landed:
             return
         
         if self.lander.rect.centery > self.bounds.h:
@@ -210,35 +221,63 @@ class LunarLanderGame(WASDGame):
         '''
         '''
 
-        if pygame.sprite.collide_mask(self.lander, self.crater):
-            self.lander.crashed = True
-        
+        # collide with landing pads
         if not self.lander.crashed:
             self.lander.collidelist(self.crater.pads)
+
+        if self.lander.landed or self.lander.crashed:
+            return
+
+        # collide with terrain
+        
+        if pygame.sprite.collide_mask(self.lander, self.crater):
+            self.lander.crashed = True
+
         
     def update(self):
         '''
         '''
 
-        if self.lander.crashed:
-            try:
-                self.sprites.remove(self.guys.pop())
-                self.lander.reset(self.start)
-            except IndexError:
-                self.gameOver = True
-
-        if self.paused:
-            self.deltaTime
-            return
+        dt = self.deltaTime
         
-        self.sprites.update(self.deltaTime)
+        if self.paused:
+            return
+
+        if self.chrome.gameOver:
+            return
+
+        if self.hesitating:
+            self.frames += 1
+            self.hesitating = (self.frames < 50)
+            self.game_scene.update(dt)
+            if not self.hesitating:
+                self.chrome.message = None
+                self.chrome.render()
+                self.lander.reset(self.start)
+                self.game_scene.add(self.lander)
+            return
+
+        self.game_scene.update(dt)
 
         self.check_bounds()
 
         self.check_collisions()
 
         if self.lander.landed:
-            self.lander.velocity.xy = (0,0)
+            return
+        
+        if self.lander.crashed:
+            if self.lander.alive():
+                e = SimpleExplosion(self.lander.position.xy,
+                                    max(self.lander.rect.w,self.lander.rect.h),
+                                    layer = self.EXPLOSIONS,
+                                    generation=5)
+                self.game_scene.add(e)
+                self.lander.kill()
+                self.chrome.nguys -= 1
+                self.chrome.render()
+                self.hesitating = True
+                self.frames = 0
 
 
     def draw(self):
@@ -247,7 +286,7 @@ class LunarLanderGame(WASDGame):
 
         self.screen.fill((0,0,0))
         
-        return self.sprites.draw(self.screen)
+        return self.game_scene.draw(self.screen)
 
     def quit(self, event=None):
         '''
