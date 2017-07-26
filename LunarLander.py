@@ -36,9 +36,9 @@ class LunarLanderGame(WASDGame):
     BLACK=(0,0,0)
     
     def __init__(self):
-        super().__init__(1024, 1024)
+        super().__init__(900, 900)
         
-        pygame.display.set_caption('Lunar Lander Demo')
+        pygame.display.set_caption('Lunar Lander')
 
         pygame.chrome = self.screen.copy()
 
@@ -52,6 +52,8 @@ class LunarLanderGame(WASDGame):
         self.add_event(QUIT,       self.quit)
         self.add_control(K_q,      self.handle_q)
         self.add_control(K_e,      self.handle_e)
+        self.add_control(K_j,      self.handle_j)
+        self.add_control(K_k,      self.handle_k)
         self.add_control(K_SPACE,  self.handle_space)
         self.add_control(K_ESCAPE, self.handle_escape)
         self.add_control(K_LSHIFT, self.handle_lshift)
@@ -179,6 +181,13 @@ class LunarLanderGame(WASDGame):
     def handle_e(self):
         self.lander.rotate(-5)
         pass
+        
+    def handle_j(self):
+        self.lander.rotate(5)
+
+    def handle_k(self):
+        self.lander.rotate(-5)
+        pass    
 
     def handle_escape(self):
         self.quit()
